@@ -1,0 +1,200 @@
+name: 'Release Semver Autotag'
+description: 'Automatically create/update semantic versioning shortcut tags (1, 1.2 / v1, v1.2) when a release is published'
+author: 'froozeify'
+
+branding:
+  icon: 'tag'
+  color: 'orange'
+
+inputs:
+  token:
+    description: 'GitHub token with contents:write permission'
+    required: false
+    default: ${{ github.token }}
+
+  mode:
+    description: |
+      Tagging mode:
+        - semver  (default) create/update prefix-stripped shortcut tags: 1, 1.2
+        - prefix            create/update prefixed shortcut tags using the tag's own prefix (e.g. v1, v1.2)
+        - both              do both — creates 1, 1.2 and v1, v1.2
+    required: false
+    default: 'semver'
+
+  tag-prefix:
+    description: 'Fallback prefix used in prefix/both mode when the release tag itself has no prefix (e.g. tag 1.2.3, uses this to build v1, v1.2)'
+    required: false
+    default: 'v'
+
+  prerelease-strategy:
+    description: |
+      How to handle prerelease tags (e.g. v1.2.3-beta.1):
+        - skip    (default) do not update shortcut tags for prerelease versions
+        - include           update shortcut tags for prerelease versions too
+    required: false
+    default: 'skip'
+
+  dry-run:
+    description: 'Set to true to log what would happen without actually creating or updating any tag'
+    required: false
+    default: 'false'
+
+outputs:
+  created-tags:
+    description: 'Comma-separated list of tags that were created'
+    value: ${{ steps.run.outputs.created-tags }}
+  updated-tags:
+    description: 'Comma-separated list of tags that were updated'
+    value: ${{ steps.run.outputs.updated-tags }}
+  skipped:
+    description: 'true if the action was skipped (non-semver tag, prerelease with skip strategy, or nothing to do)'
+    value: ${{ steps.run.outputs.skipped }}
+
+runs:
+  using: composite
+  steps:
+    - name: Update semver tags
+      id: run
+      uses: actions/github-script@v9
+      env:
+        INPUT_MODE: ${{ inputs.mode }}
+        INPUT_TAG_PREFIX: ${{ inputs.tag-prefix }}
+        INPUT_PRERELEASE_STRATEGY: ${{ inputs.prerelease-strategy }}
+        INPUT_DRY_RUN: ${{ inputs.dry-run }}
+      with:
+        github-token: ${{ inputs.token }}
+        script: |
+          const tag             = context.ref.replace('refs/tags/', '');
+          const mode            = process.env.INPUT_MODE                || 'semver';
+          const fallbackPrefix  = process.env.INPUT_TAG_PREFIX          || 'v';
+          const prereleaseStrategy = process.env.INPUT_PRERELEASE_STRATEGY || 'skip';
+          let dryRun            = process.env.INPUT_DRY_RUN === 'true';
+          const sha             = context.sha;
+
+          // ── Extract prefix and version ───────────────────────────────────
+          // tagPrefix = leading non-digit chars (e.g. "v", "release-", "")
+          // version   = the numeric semver part  (e.g. "1.2.3")
+          const prefixMatch = tag.match(/^([^\d]*)(\d.*)$/);
+          if (!prefixMatch) {
+            core.setFailed(`Tag "${tag}" does not contain a numeric version part.`);
+            return;
+          }
+          const tagPrefix = prefixMatch[1];
+          const version   = prefixMatch[2];
+
+          // ── Validate semver ──────────────────────────────────────────────
+          const semverMatch = version.match(/^(\d+)\.(\d+)\.(\d+)(?:-([^+]+))?(?:\+.+)?$/);
+          if (!semverMatch) {
+            core.setFailed(`Tag "${tag}" is not a valid semver tag (expected [prefix]MAJOR.MINOR.PATCH[-prerelease]).`);
+            return;
+          }
+
+          const [, major, minor, , prereleasePart] = semverMatch;
+          const isPrerelease = !!prereleasePart || context.payload.release?.prerelease === true;
+
+          // ── Prerelease guard ─────────────────────────────────────────────
+          // A prerelease skip behaves like an implicit dry-run: we still resolve
+          // which tags would be affected and show them in the summary, but we
+          // never write anything to the repository.
+          const skipDueToPrerelease = isPrerelease && prereleaseStrategy === 'skip';
+          if (skipDueToPrerelease) {
+            const reason = context.payload.release?.prerelease
+              ? 'GitHub release is marked as pre-release'
+              : `semver prerelease suffix "-${prereleasePart}"`;
+            core.warning(`Shortcut tags will not be updated — ${reason} (prerelease-strategy: skip).`);
+            dryRun = true;
+          }
+
+          // ── Resolve prefix for prefix/both mode ──────────────────────────
+          // Use the prefix detected from the tag; fall back to tag-prefix input
+          // when the tag itself has no prefix (e.g. bare "1.2.3").
+          const resolvedPrefix = tagPrefix || fallbackPrefix;
+
+          // ── Collect tags to process based on mode ────────────────────────
+          const tagsToProcess = [];
+
+          if (mode === 'semver' || mode === 'both') {
+            // Prefix-stripped shortcut tags: 1, 1.2
+            tagsToProcess.push(`${major}`, `${major}.${minor}`);
+          }
+
+          if (mode === 'prefix' || mode === 'both') {
+            // Prefixed shortcut tags: v1, v1.2 (or whatever prefix the tag carries)
+            tagsToProcess.push(`${resolvedPrefix}${major}`, `${resolvedPrefix}${major}.${minor}`);
+          }
+
+          if (tagsToProcess.length === 0) {
+            core.info('No tags to update for the current mode and tag format.');
+            core.setOutput('skipped', 'true');
+            core.setOutput('created-tags', '');
+            core.setOutput('updated-tags', '');
+            return;
+          }
+
+          // ── Create / update each tag ─────────────────────────────────────
+          const created = [];
+          const updated = [];
+
+          for (const shortTag of tagsToProcess) {
+            let exists = false;
+            try {
+              await github.rest.git.getRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `tags/${shortTag}`,
+              });
+              exists = true;
+            } catch (e) {
+              if (e.status !== 404) throw e;
+            }
+
+            if (exists) {
+              if (dryRun) {
+                core.info(`[skipped] Would update "${shortTag}" → ${sha.slice(0, 7)}`);
+              } else {
+                await github.rest.git.updateRef({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  ref: `tags/${shortTag}`,
+                  sha,
+                  force: true,
+                });
+              }
+              updated.push(shortTag);
+            } else {
+              if (dryRun) {
+                core.info(`[skipped] Would create "${shortTag}" → ${sha.slice(0, 7)}`);
+              } else {
+                await github.rest.git.createRef({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  ref: `refs/tags/${shortTag}`,
+                  sha,
+                });
+              }
+              created.push(shortTag);
+            }
+          }
+
+          core.setOutput('created-tags', created.join(','));
+          core.setOutput('updated-tags', updated.join(','));
+          core.setOutput('skipped', String(skipDueToPrerelease));
+
+          // ── Job summary ──────────────────────────────────────────────────
+          const headingSuffix = skipDueToPrerelease ? ' (skipped — prerelease)' : dryRun ? ' (dry run)' : '';
+          const actionSuffix  = skipDueToPrerelease ? ' (skipped)'              : dryRun ? ' (dry run)' : '';
+          const rows = dryRun
+            ? [
+                ...created.map(t => `| \`${t}\` | would create${actionSuffix} | \`${sha.slice(0, 7)}\` |`),
+                ...updated.map(t => `| \`${t}\` | would update${actionSuffix} | \`${sha.slice(0, 7)}\` |`),
+              ]
+            : [
+                ...created.map(t => `| \`${t}\` | created | \`${sha.slice(0, 7)}\` |`),
+                ...updated.map(t => `| \`${t}\` | updated | \`${sha.slice(0, 7)}\` |`),
+              ];
+
+          let summary = `## Semver autotag for ${tag}${headingSuffix}\n\n`;
+          summary += '| Tag | Action | Commit |\n|-----|--------|--------|\n';
+          summary += rows.join('\n') + '\n';
+
+          await core.summary.addRaw(summary).write();
