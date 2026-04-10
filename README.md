@@ -11,7 +11,9 @@ For example, if a release is tagged `v1.2.3`, the action will create/update the 
 - **`semver` mode**: creates clean numeric shortcut tags — `1`, `1.2` — stripping any prefix from the release tag
 - **`prefix` mode**: creates prefixed shortcut tags — `v1`, `v1.2` — using the release tag's own prefix
 - **`both` mode**: creates all four — `1`, `1.2`, `v1`, `v1.2`
-- **Prerelease guard**: skips writing tags for prerelease versions by default — detected via semver suffix (e.g. `v1.2.3-beta.1`) **or** the GitHub release's pre-release flag — but still shows what would have been created in the job summary
+- **Prerelease guard**: skips writing tags for prerelease versions by default — detected via semver suffix (e.g.
+  `v1.2.3-beta.1`) **or** the GitHub release's pre-release flag — but still shows what would have been created in the
+  job summary
 - **Dry-run**: preview what would happen without touching any tag
 - **Job summary**: writes a table of created/updated tags to the workflow summary
 
@@ -41,20 +43,20 @@ jobs:
 
 ## Inputs
 
-| Input                 | Required | Default               | Description                                                                                                        |
-|-----------------------|----------|-----------------------|--------------------------------------------------------------------------------------------------------------------|
-| `token`               | no       | `${{ github.token }}` | GitHub token with `contents:write` permission.                                                                     |
-| `mode`                | no       | `semver`              | Tagging mode — see [Modes](#modes).                                                                               |
+| Input                 | Required | Default               | Description                                                                                                           |
+|-----------------------|----------|-----------------------|-----------------------------------------------------------------------------------------------------------------------|
+| `token`               | no       | `${{ github.token }}` | GitHub token with `contents:write` permission.                                                                        |
+| `mode`                | no       | `semver`              | Tagging mode — see [Modes](#modes).                                                                                   |
 | `tag-prefix`          | no       | `v`                   | Fallback prefix used in `prefix`/`both` mode when the release tag itself has no prefix (e.g. `1.2.3` → `v1`, `v1.2`). |
-| `prerelease-strategy` | no       | `skip`                | `skip` to ignore prerelease tags, `include` to update shortcut tags for them too.                                 |
-| `dry-run`             | no       | `false`               | Set to `true` to log what would happen without creating or updating any tag.                                      |
+| `prerelease-strategy` | no       | `skip`                | `skip` to ignore prerelease tags, `include` to update shortcut tags for them too.                                     |
+| `dry-run`             | no       | `false`               | Set to `true` to log what would happen without creating or updating any tag.                                          |
 
 ## Outputs
 
-| Output         | Description                                                                      |
-|----------------|----------------------------------------------------------------------------------|
-| `created-tags` | Comma-separated list of tags that were created.                                  |
-| `updated-tags` | Comma-separated list of tags that were updated.                                  |
+| Output         | Description                                                                                            |
+|----------------|--------------------------------------------------------------------------------------------------------|
+| `created-tags` | Comma-separated list of tags that were created.                                                        |
+| `updated-tags` | Comma-separated list of tags that were updated.                                                        |
 | `skipped`      | `true` if the action was skipped due to a prerelease (tags are listed in the summary but not written). |
 
 ---
@@ -65,11 +67,11 @@ jobs:
 
 Strips any leading non-numeric prefix from the release tag to produce clean numeric shortcut tags.
 
-| Release tag      | Tags created/updated |
-|------------------|----------------------|
-| `v1.2.3`         | `1`, `1.2`           |
-| `1.2.3`          | `1`, `1.2`           |
-| `release-1.2.3`  | `1`, `1.2`           |
+| Release tag     | Tags created/updated |
+|-----------------|----------------------|
+| `v1.2.3`        | `1`, `1.2`           |
+| `1.2.3`         | `1`, `1.2`           |
+| `release-1.2.3` | `1`, `1.2`           |
 
 ```yaml
 - uses: froozeify/gh-release-semver-autotag@v1
@@ -79,13 +81,14 @@ Strips any leading non-numeric prefix from the release tag to produce clean nume
 
 ### `prefix`
 
-Creates shortcut tags using the prefix detected from the release tag. If the tag has no prefix, falls back to the `tag-prefix` input (`v` by default).
+Creates shortcut tags using the prefix detected from the release tag. If the tag has no prefix, falls back to the
+`tag-prefix` input (`v` by default).
 
-| Release tag      | Tags created/updated         |
-|------------------|------------------------------|
-| `v1.2.3`         | `v1`, `v1.2`                 |
-| `1.2.3`          | `v1`, `v1.2` *(fallback)*    |
-| `release-1.2.3`  | `release-1`, `release-1.2`   |
+| Release tag     | Tags created/updated          |
+|-----------------|-------------------------------|
+| `v1.2.3`        | `v1`, `v1.2`                  |
+| `1.2.3`         | `v1`, `v1.2`, `v1.2.3` + warn |
+| `release-1.2.3` | `release-1`, `release-1.2`    |
 
 ```yaml
 - uses: froozeify/gh-release-semver-autotag@v1
@@ -97,11 +100,11 @@ Creates shortcut tags using the prefix detected from the release tag. If the tag
 
 Creates both the prefix-stripped and prefixed shortcut tags.
 
-| Release tag      | Tags created/updated              |
-|------------------|-----------------------------------|
-| `v1.2.3`         | `1`, `1.2`, `v1`, `v1.2`         |
-| `1.2.3`          | `1`, `1.2`, `v1`, `v1.2`         |
-| `release-1.2.3`  | `1`, `1.2`, `release-1`, `release-1.2` |
+| Release tag     | Tags created/updated                   |
+|-----------------|----------------------------------------|
+| `v1.2.3`        | `1`, `1.2`, `v1`, `v1.2`               |
+| `1.2.3`         | `1`, `1.2`, `v1.2.3`, `v1`, `v1.2`     |
+| `release-1.2.3` | `1`, `1.2`, `release-1`, `release-1.2` |
 
 ```yaml
 - uses: froozeify/gh-release-semver-autotag@v1
