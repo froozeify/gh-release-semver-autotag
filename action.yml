@@ -121,6 +121,16 @@ runs:
           if (mode === 'prefix' || mode === 'both') {
             // Prefixed shortcut tags: v1, v1.2 (or whatever prefix the tag carries)
             tagsToProcess.push(`${resolvedPrefix}${major}`, `${resolvedPrefix}${major}.${minor}`);
+
+            // If the release tag doesn't already carry the resolved prefix,
+            // also create the full prefixed tag (e.g. 1.2.3 → v1.2.3) for consistency.
+            const fullPrefixedTag = `${resolvedPrefix}${version}`;
+            if (fullPrefixedTag !== tag) {
+              if (mode === 'prefix') {
+                core.warning(`Release tag "${tag}" does not match the expected prefix "${resolvedPrefix}". Creating full prefixed tag "${fullPrefixedTag}" for consistency.`);
+              }
+              tagsToProcess.push(fullPrefixedTag);
+            }
           }
 
           if (tagsToProcess.length === 0) {
